@@ -5,21 +5,25 @@
 #include <SDL_audio.h>
 #include <memory>
 #include <vector>
+#include "SDL_mixer.h"
+#include <string>
+#include <iostream>
 
 class Sound;
 
 class AudioManager
 {
-	static SDL_AudioSpec sAudioFormat;
-	static std::vector<std::shared_ptr<Sound>> sSoundVector;
-	static std::shared_ptr<AudioManager> sInstance;
-
-	static void mixAudio(void *unused, Uint8 *stream, int len);
-
+private:
 	AudioManager();
 
+	static std::vector<std::shared_ptr<Sound>> sSoundVector;
+	static AudioManager* sInstance;
+
+	bool mInitialized;
+
 public:
-	static std::shared_ptr<AudioManager> & getInstance();
+	static AudioManager* getInstance();
+	static bool isInitialized();
 
 	void init();
 	void deinit();
