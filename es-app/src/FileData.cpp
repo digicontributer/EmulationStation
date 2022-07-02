@@ -314,6 +314,8 @@ void FileData::launchGame(Window* window)
 	CollectionSystemManager::get()->refreshCollectionSystems(gameToUpdate);
 
 	gameToUpdate->mSystem->onMetaDataSavePoint();
+
+	AudioManager::getInstance()->playRandomMusic();
 }
 
 CollectionFileData::CollectionFileData(FileData* file, SystemData* system)

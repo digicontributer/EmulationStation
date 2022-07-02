@@ -12,7 +12,7 @@ std::vector<std::shared_ptr<Sound>> AudioManager::sSoundVector;
 AudioManager* AudioManager::sInstance = NULL;
 
 
-AudioManager::AudioManager() : mInitialized(false)
+AudioManager::AudioManager() : mInitialized(false), mCurrentMusic(nullptr), mMusicVolume(Settings::getInstance()->getInt("MusicVolume"))
 {
 	init();
 }
@@ -75,10 +75,14 @@ void AudioManager::deinit()
 
 	//stop all playback
 	stop();
+	stopMusic();
 
 	// Free known sounds from memory
 	for(unsigned int i = 0; i < sSoundVector.size(); i++)
 		sSoundVector[i]->deinit();
+
+	Mix_HookMusicFinished(nullptr);
+	Mix_HaltMusic();
 
 	//completely tear down SDL audio. else SDL hogs audio resources and emulators might fail to start...
 	Mix_CloseAudio();
@@ -120,4 +124,143 @@ void AudioManager::stop()
 	for (unsigned int i = 0; i < sSoundVector.size(); i++)
 		if (sSoundVector.at(i)->isPlaying())
 			sSoundVector[i]->stop();
+}
+
+void AudioManager::getMusicIn(const std::string &path, std::vector<std::string>& all_matching_files)
+{	
+	if(!Utils::FileSystem::isDirectory(path)){
+		return;
+	}
+
+  auto dirContent = Utils::FileSystem::getDirContent(path);
+
+  for(auto it = dirContent.cbegin(); it != dirContent.cend(); ++it)
+	{	
+		if (Utils::FileSystem::isDirectory(*it))
+		{
+			if (*it == "." || *it == "..")
+				continue;
+		}
+		else
+		{
+			std::string extension = Utils::String::toLower(Utils::FileSystem::getExtension(*it));
+			if (extension == ".mp3" || extension == ".ogg" || extension == ".flac"
+				|| extension == ".wav" || extension == ".mod" || extension == ".xm"
+				|| extension == ".stm" || extension == ".s3m" || extension == ".far"
+				|| extension == ".it" || extension == ".669" || extension == ".mtm")
+				all_matching_files.push_back(*it);
+		}
+	}		
+}
+
+void AudioManager::playRandomMusic(bool continueIfPlaying) 
+{
+	if(!Settings::getInstance()->getBool("EnableMusic"))
+		return;
+		
+	std::vector<std::string> musics;
+
+	// check in RetroPie music directory
+	if(musics.empty())
+		getMusicIn(Utils::FileSystem::getHomePath() + "/RetroPie/roms/music", musics);
+  
+	// check in system sound directory
+	if(musics.empty())
+		getMusicIn("/opt/retropie/music", musics);
+  
+	// check in .emulationstation/music directory
+	if(musics.empty())
+		getMusicIn(Utils::FileSystem::getHomePath() + "/.emulationstation/music", musics);
+
+	if(musics.empty())
+		return;
+
+#if defined(WIN32)
+	srand(time(NULL) % getpid());
+#else
+	srand(time(NULL) % getpid() + getppid());
+#endif
+
+	int randomIndex = rand() % musics.size();
+
+	// continue playing ?
+	if(mCurrentMusic != nullptr && continueIfPlaying)
+		return;
+
+	playMusic(musics.at(randomIndex));
+}	
+
+void AudioManager::playMusic(std::string path)
+{
+	if (!mInitialized)
+		return;
+
+	// free the previous music
+	stopMusic(false);
+
+	if(!Settings::getInstance()->getBool("EnableMusic"))
+		return;
+
+	// load a new music
+	mCurrentMusic = Mix_LoadMUS(path.c_str());
+	if (mCurrentMusic == NULL)
+	{
+		LOG(LogError) << Mix_GetError() << " for " << path;
+		return;
+	}
+
+	if (Mix_FadeInMusic(mCurrentMusic, 1, 1000) == -1)
+	{
+		stopMusic();
+		return;
+	}
+
+	Mix_HookMusicFinished(AudioManager::musicEnd_callback);
+}
+
+void AudioManager::musicEnd_callback()
+{
+  if(!Settings::getInstance()->getBool("EnableMusic"))
+		return;
+
+	AudioManager::getInstance()->playRandomMusic(false);
+}
+
+void AudioManager::stopMusic(bool fadeOut)
+{
+	if (mCurrentMusic == NULL)
+		return;
+
+	Mix_HookMusicFinished(nullptr);
+
+	if (fadeOut)
+	{
+		// Fade-out is nicer !
+		while (!Mix_FadeOutMusic(500) && Mix_PlayingMusic())
+			SDL_Delay(100);
+	}
+
+	Mix_HaltMusic();
+	Mix_FreeMusic(mCurrentMusic);
+	mCurrentMusic = NULL;
+}
+
+int AudioManager::getMaxMusicVolume()
+{
+	int ret = (Settings::getInstance()->getInt("MusicVolume") * MIX_MAX_VOLUME) / 100;
+	if (ret > MIX_MAX_VOLUME)
+		return MIX_MAX_VOLUME;
+
+	if (ret < 0)
+		return 0;
+
+	return ret;
+}
+
+void AudioManager::update(int deltaTime)
+{
+	if(sInstance == nullptr || !sInstance->mInitialized || !Settings::getInstance()->getBool("EnableMusic"))
+		return;
+
+	Mix_VolumeMusic((int)sInstance->mMusicVolume);
 }
